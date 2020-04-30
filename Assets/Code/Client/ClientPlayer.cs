@@ -10,7 +10,7 @@ namespace Code.Client
         private readonly ClientLogic _clientLogic;
         private readonly ClientPlayerManager _playerManager;
         private readonly LiteRingBuffer<PlayerInputPacket> _predictionPlayerStates;
-        private ServerState _lastServerState;
+        private ushort _lastProcessedCommandId;
         private const int MaxStoredCommands = 60;
         private bool _firstStateReceived;
         private int _updateCount;
@@ -35,20 +35,18 @@ namespace Code.Client
                     return;
                 _firstStateReceived = true;
             }
-            if (serverState.Tick == _lastServerState.Tick || 
-                serverState.LastProcessedCommand == _lastServerState.LastProcessedCommand)
+            if (serverState.LastProcessedCommand == _lastProcessedCommandId)
                 return;
-
-            _lastServerState = serverState;
-
+            
+            _lastProcessedCommandId = serverState.LastProcessedCommand;
+            
             //sync
             _position = ourState.Position;
             _rotation = ourState.Rotation;
             if (_predictionPlayerStates.Count == 0)
                 return;
 
-            ushort lastProcessedCommand = serverState.LastProcessedCommand;
-            int diff = NetworkGeneral.SeqDiff(lastProcessedCommand,_predictionPlayerStates.First.Id);
+            int diff = NetworkGeneral.SeqDiff(_lastProcessedCommandId,_predictionPlayerStates.First.Id);
             
             //apply prediction
             if (diff >= 0 && diff < _predictionPlayerStates.Count)
@@ -60,10 +58,10 @@ namespace Code.Client
             }
             else if(diff >= _predictionPlayerStates.Count)
             {
-                Debug.Log($"[C] Player input lag st: {_predictionPlayerStates.First.Id} ls:{lastProcessedCommand} df:{diff}");
+                Debug.Log($"[C] Player input lag st: {_predictionPlayerStates.First.Id} ls:{_lastProcessedCommandId} df:{diff}");
                 //lag
                 _predictionPlayerStates.FastClear();
-                _nextCommand.Id = lastProcessedCommand;
+                _nextCommand.Id = _lastProcessedCommandId;
             }
             else
             {
@@ -79,7 +77,7 @@ namespace Code.Client
         public void SetInput(Vector2 velocity, float rotation, bool fire)
         {
             _nextCommand.Keys = 0;
-            if(fire)
+            if (fire)
                 _nextCommand.Keys |= MovementKeys.Fire;
             
             if (velocity.x < -0.5f)
@@ -100,11 +98,10 @@ namespace Code.Client
             LastRotation = _rotation;
             
             _nextCommand.Id = (ushort)((_nextCommand.Id + 1) % NetworkGeneral.MaxGameSequence);
-            _nextCommand.ServerTick = _lastServerState.Tick;
             ApplyInput(_nextCommand, delta);
             if (_predictionPlayerStates.IsFull)
             {
-                _nextCommand.Id = (ushort)(_lastServerState.LastProcessedCommand+1);
+                _nextCommand.Id = (ushort)(_lastProcessedCommandId + 1);
                 _predictionPlayerStates.FastClear();
             }
             _predictionPlayerStates.Add(_nextCommand);
@@ -114,7 +111,7 @@ namespace Code.Client
             {
                 _updateCount = 0;
                 foreach (var t in _predictionPlayerStates)
-                    _clientLogic.SendPacketSerializable(PacketType.Movement, t, DeliveryMethod.Unreliable);
+                    _clientLogic.SendPlayerInput(t);
             }
 
             base.Update(delta);

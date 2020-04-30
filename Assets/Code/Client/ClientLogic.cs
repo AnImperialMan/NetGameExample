@@ -138,6 +138,12 @@ namespace Code.Client
             _playerManager.AddClientPlayer(clientPlayer, view);
         }
 
+        public void SendPlayerInput(PlayerInputPacket playerInputPacket)
+        {
+            playerInputPacket.ServerTick = _lastServerTick;
+            SendPacketSerializable(PacketType.Movement, playerInputPacket, DeliveryMethod.Unreliable);
+        }
+        
         public void SendPacketSerializable<T>(PacketType type, T packet, DeliveryMethod deliveryMethod) where T : INetSerializable
         {
             if (_server == null)
